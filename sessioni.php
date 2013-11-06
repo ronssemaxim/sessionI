@@ -1,7 +1,7 @@
 <?php
 /*
 SessionI, Improved Session for PHP
-@TODO: comments :(
+@TODO: Read, write, update vars with paramters (secure, domain, path,...)
 */
 require_once __DIR__ . '/includes/config.php';
 
@@ -37,6 +37,9 @@ class sessioni {
 		
 		$cookieKey = isset($_COOKIE['sessioniKey']) ? $_COOKIE['sessioniKey'] : ''; // get the client's cookie
 		
+		if(!$this->hasSessioni($this->ip)) {
+			$this->createSessioni();
+		}
 		if($cookieKey != $this->getSessioniKey()) { // if the key from the db doesn't match the cookie's key
 			if(IPMATCHKEY) { // if ip must match key, create new session
 				$this->dropSessioni();
@@ -63,125 +66,194 @@ class sessioni {
 		unset($GLOBALS["sessioni"]);
 	}
 	
+	/**
+	* connect to db & return pdo object
+	* <return>PDO connection</return>
+	*/
 	private function dbConnect() {
 		try {
 			$db = new PDO('mysql:host=' . DB_HOST .';dbname=' . DB_NAME . ';charset=utf8', DB_USER, DB_PASS);
-			$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+			$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION); // prevent sql injection ;)
 			$db->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
 		} catch (Exception $e) {
-			showDbError('connect', $e->getMessage());
+			throw new Exception("Unable to connect to DB!");
 		}
 		return $db;
 	}
 	
+	/**
+	* set the class's properties for the choosen ip
+	* <param name="ip">Optional. The ip to load the properties with.</param>
+	*/
 	public function loadProperties($ip = null) {
 		if($ip = null) {
 			$ip = $this->ip;
 		}
-		if(!$this->hasSessioni()) { // if user hasn't got a sessioni, give one
-			$this->sessioniId = $this->createSessioni();
+		if(!$this->hasSessioni($ip)) { // if user hasn't got a sessioni, give one
+			$this->sessioniId = $this->createSessioni($ip);
 		}
-		$this->resetSessioniExpiration();
 		$this->sessioniId = $this->getSessioniId($ip);
 		$this->sessioniKey = $this->getSessioniKey($ip);
+		$this->resetSessioniExpiration(); // reset session expiration each time it is accessed
 	}
 	
+	/**
+	* Checks for an ip/key if it has a sessioni linked to it.
+	* <param name="ip">Optional. The ip/key to check.</param>
+	* <return>Returns true if the choosen ip/key has a sessioni.</return>
+	*/
 	public function hasSessioni($ip = null) {
 		if($ip == null) {
 			$ip = $this->ip;
 		}
-		$stmt = $this->db->prepare('SELECT `id` FROM `'.TBL_NAMEKEYS.'` WHERE ip = ? OR `key` = ?');
+		$stmt = $this->db->prepare('SELECT `id` FROM `'.TBL_NAMEKEYS.'` WHERE `key` = ? OR ip = ?');
 		$stmt->execute(array($ip, $ip));
 		
-		$value = $stmt->fetchColumn();
-		if(empty($value)) {
+		if($stmt->rowCount() <= 0) {
 			return false;
 		}
 		return true;
 	}
 	
+	/**
+	* get the sessioni key for the choosen ip/key
+	* <param name="ip">Optional. The ip/key to get the sessioni key from.</param>
+	* <return>The found sessioniKey. Null if not found.</return>
+	*/
 	public function getSessioniKey($ip = null) {
 		if($ip == null) {
 			$ip = $this->ip;
 		}
-		$stmt = $this->db->prepare('SELECT `key` from `'.TBL_NAMEKEYS.'` WHERE ip = ?');
-		$stmt->execute(array($ip));
-		
+		$stmt = $this->db->prepare('SELECT `key` from `'.TBL_NAMEKEYS.'` WHERE `key` = ? OR ip = ?');
+		$stmt->execute(array($ip, $ip));
+		if($stmt->rowCount() <= 0) {
+			return null;
+		}
 		return $stmt->fetchColumn();
 	}
 	
+	/**
+	* get the sessioni id for the choosen ip/key
+	* <param name="ip">Optional. The ip/key to get the sessioniId from.</param>
+	* <return>The found sessioniId. Null if not found.</return>
+	*/
 	public function getSessioniId($ip = null) {
 		if($ip == null) {
 			$ip = $this->ip;
 		}
-		$stmt = $this->db->prepare('SELECT `id` from `'.TBL_NAMEKEYS.'` WHERE ip = ?');
-		$stmt->execute(array($ip));
-		
+		$stmt = $this->db->prepare('SELECT `id` from `'.TBL_NAMEKEYS.'` WHERE `key` = ? OR ip = ?');
+		$stmt->execute(array($ip, $ip));
+		if($stmt->rowCount() <= 0) {
+			return null;
+		}
 		return (int)$stmt->fetchColumn();
 	}
 	
-	public function createSessioni($ip = null, $sessioniId = null, $expire = null) {
+	/**
+	* get the sessioni expiration datetime for the choosen ip/key
+	* <param name="ip">Optional. The ip/key to get the session expiration from.</param>
+	* <return>The expiration time. Null if not found.</return>
+	*/
+	public function getSessioniExpiration($ip = null) {
+		if($ip == null) {
+			$ip = $this->sessioniKey;
+		}
+		$stmt = $this->db->prepare('SELECT expires FROM `'.TBL_NAMEKEYS.'` WHERE `key` = ? OR ip = ?');
+		$stmt->execute(array($ip, $ip));
+		
+		if($stmt->rowCount() <= 0) {
+			return null;
+		}
+		
+		return $stmt->fetchColumn();
+	}
+	
+	/**
+	* creates a sessioni for a ip, with a desired sessioniKey and expiration
+	* <param name="ip">Optional. Not set: current client ip.</param>
+	* <param name="sessioniKey">Optional. Not set: random. Set: choosen key, or random if taken.</param>
+	* <param name="expire">Optional. Not set: current datetime + DEFAULTKEYEXPIRETIME.Set: in DateInterval</param>
+	* <return>The generated sessioniId.</return>
+	*/
+	public function createSessioni($ip = null, $sessioniKey = null, $expire = null) {
 		if($ip == null) {
 			$ip = $this->ip;
 		}
+		
+		$this->dropSessioni($ip); // drop the session first
+		
 		if($expire == null) {
 			$expire = DEFAULTKEYEXPIRETIME;
 		}
-		$this->dropSessioni($ip);
-		if($sessioniId == null) {
-			do {
-				$sessioniId = $this->generateRandomString();
-			} while($this->hasSessioni($sessioniId));
+		
+		if($sessioniKey == null) { // make sessioniKey
+			$sessioniKey = $this->generateRandomString();
 		}
+		while($this->hasSessioni($sessioniKey)) { // while key taken, generate new one.
+			$sessioniKey = $this->generateRandomString();
+		}
+		
 		$date = new DateTime();
 		$date->add(new DateInterval($expire));
 		$stmt = $this->db->prepare('INSERT INTO `'.TBL_NAMEKEYS.'` (`key`, ip, expires) VALUES (?,?, ?)');
-		$stmt->execute(array($sessioniId, $ip, $date->format('Y-m-d H:i:s')));
+		$stmt->execute(array($sessioniKey, $ip, $date->format('Y-m-d H:i:s')));
+		
 		setcookie('sessioniKey', $this->getSessioniKey($ip), time()+60*60*24*7);
+		
 		return $this->db->lastInsertId();
 	}
 	
+	/**
+	* Drop the session of the desired ip
+	* <param name="ip">Optional. The ip/key to drop the sessioni for.</param>
+	*/
 	public function dropSessioni($ip = null) {
 		if($ip == null) {
 			$ip = $this->ip;
 		}
-		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId IN (SELECT id from `'.TBL_NAMEKEYS.'` WHERE ip = ?)');
-		$stmt->execute(array($ip));
-		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEKEYS.'` WHERE ip = ?');
-		$stmt->execute(array($ip));
+		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEKEYS.'` WHERE `key` = ? OR ip = ?'); // foreign keys are in cascade, so no need to drop the vars
+		$stmt->execute(array($ip, $ip));
 		if($ip == $this->ip) {
 			setcookie('sessioniKey', '', time()-60*60*24*7);
 		}
 	}
 	
+	/**
+	* drops expired sessionis
+	*/
 	public function dropExpiredSessionis() {
 		$date = new Datetime();
 		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEKEYS.'` WHERE expires < ?');
 		$stmt->execute(array($date->format('Y-m-d H:i;s')));
 	}
 	
-	public function resetSessioniExpiration($sessioniKey = null) {
-		if($sessioniKey == null) {
-			$sessioniKey = $this->sessioniKey;
+	/**
+	* Resets the ip/key 's sessioni time.
+	* <param name="ip">Optional. The ip/key to reset the expiration for.</param>
+	*/
+	public function resetSessioniExpiration($ip = null) {
+		if($ip == null) {
+			$ip = $this->sessioniKey;
 		}
 		$date = new DateTime();
 		$date->add(new DateInterval(DEFAULTKEYEXPIRETIME));
 		
-		$stmt = $this->db->prepare('UPDATE `'.TBL_NAMEKEYS.'` SET expires = ? WHERE `key` = ?');
-		$stmt->execute(array($date->format('Y-m-d H:i;s'), $sessioniKey));
+		$stmt = $this->db->prepare('UPDATE `'.TBL_NAMEKEYS.'` SET expires = ? WHERE `key` = ? OR ip = ?');
+		$stmt->execute(array($date->format('Y-m-d H:i;s'), $ip, $ip));
 	}
+
 	
-	public function getSessioniExpiration($sessioniKey = null) {
-		if($sessioniKey == null) {
-			$sessioniKey = $this->sessioniKey;
-		}
-		$stmt = $this->db->prepare('SELECT expires FROM `'.TBL_NAMEKEYS.'` WHERE `key` = ?');
-		$stmt->execute(array($sessioniKey));
-		
-		
-		return $stmt->fetchColumn();
-	}
-	
+	/**
+	* Sets a var for a sessioni.
+	* <param name="var">The name of the variable.</param>
+	* <param name="value">The value to set for the variable.</param>
+	* <param name="expire">Optional. The expiration time in DateInterval.</param>
+	* <param name="domain">Optional. The domain to search the var in. No domain means visible on any domain.</param>
+	* <param name="path">Optional. The path to search the path in. No path means visible in any path</param>
+	* <param name="secure">Optional. Search in HTTP(S). Note: SECUREGLOBAL (see config).</param>
+	* <param name="sessioniId">Optional. the sessioniId to set the var for</param>
+	* <return>True if succeeded</return>
+	*/
 	public function setVar($var, $value, $expire = null, $domain = null, $path = null, $secure = null, $sessioniId = null) {
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
@@ -189,7 +261,17 @@ class sessioni {
 		if($expire == null) {
 			$expire = DEFAULTVAREXPIRETIME;
 		}
-		if($secure == null) {
+		else { // check if expire is expired
+			$reqDate = new Datetime();
+			$reqDate->add(new DateInterval($expire));
+			$curDate = new Datetime();
+			$diff = $reqDate->getTimestamp() - $curDate->getTimestamp();
+			if($diff < 0) { // if expired; drop it & return true
+				dropVar($var, $sessioniId);
+				return true;
+			}
+		}
+		if($secure == null) { // set the secure
 			if(DEFAULTSECURE == "follow") {
 				$secure = $this->https;
 			}
@@ -197,18 +279,26 @@ class sessioni {
 				$secure = DEFAULTSECURE;
 			}
 		}
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}
+		
 		if($domain == null) {
 			$domain = '';
 		}
 		
-		if($this->getVar($var) !=  null && !OVERWRITEVARS) {
-			return false;
-		}
-		else {
-			$this->dropVar($var);
+		if($this->getVar($var, $sessioniId) !=  null) { // var exists
+			if(!OVERWRITEVARS) { // if overwrite is  not permitted
+				return false;
+			}
+			else { // else drop the var & continue
+				$this->dropVar($var, $sessioniId);
+			}
 		}
 		
-		if($path == null) {
+		if($path == null) { // if no path is set
 			$stmt = $this->db->prepare('INSERT INTO `'.TBL_NAMEVARS.'` (`sessioniId`, `varName`, `varValue`, `expires`, `domain`, `secure`) VALUES (?, ?, ?, ?, ?, ?)');
 			$date = new DateTime();
 			$date->add(new DateInterval($expire));
@@ -222,15 +312,18 @@ class sessioni {
 
 			$stmt->execute(array($sessioniId, $var, $value, $date->format('Y-m-d H:i:s'), $domain, $path, $secure));
 		}
-		if($stmt->rowCount() <= 0) {
+		
+		if($stmt->rowCount() <= 0) { // if somehow the db didnt accept the var, return false
 			return false;
 		}
-		if(!isset($GLOBALS[$var])) {
-			$GLOBALS[$var] = $value;
-		}
+		$this->loadVars(); // reload $_SESIONI
 		return true;
 	}
 	
+	/**
+	* Drops expired vars.
+	* <param name="sessioniId">Optional. A sessioniId. Set: drop expired vars for this session. Not set: drop expired vars for all sessions.</param>
+	*/
 	public function dropExpiredVars($sessioniId = null) {
 		$date = new Datetime();
 		if($sessioniId == null) {
@@ -243,18 +336,31 @@ class sessioni {
 		}
 	}
 	
+	/**
+	* Drop a var.
+	* <param name="var">The var to drop.</param>
+	* <param name="sessioniId">Optional. The sessioniId. Not set: current sessioniId</param>
+	*/
 	public function dropVar($var, $sessioniId = null) {
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
 		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ?');
-		$date = new Datetime();
-		$stmt->execute(array($sessioniId, $var, $date->format('Y-m-d H:i;s')));
+		$stmt->execute(array($sessioniId, $var));
 		if(isset($GLOBALS[$var])) {
 			unset($GLOBALS[$var]);
 		}
 	}
 	
+	
+	/**
+	* Get a variable value.
+	* <param name="var">The var to read.</param>
+	* <param name="domain">Optional. The domain to search in.</param>
+	* <param name="path">Optional. The path to search in.</param>
+	* <param name="sessioniId">Optional. The sessioniId to search in. Not set: current sessioniId.</param>
+	* <return>Null if not found. Value if found</return>
+	*/
 	public function getVar($var, $domain = null, $path = null, $sessioniId = null) {
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
@@ -277,16 +383,17 @@ class sessioni {
 		}
 		return $stmt->fetchColumn();
 	}
-	
+	/**
+	* Get the expiration time of a variable.
+	* <param name="var">The var.</param>
+	* <param name="domain">Optional. The domain to search in.</param>
+	* <param name="path">Optional. The path to search in.</param>
+	* <param name="sessioniId">Optional. The sessioniId to search in. Not set: current sessioniId.</param>
+	* <return>Null if not found, else the expiration time.</return>
+	*/
 	public function getVarExpiration($var, $domain = null, $path = null, $sessioniId = null) {
 		if($sessioniId == null) {
-			if(!isset($this->sessioniId)) {
-				throw new Exception("getVarExpiration: Set sessionId first, or pass it");
-			}
 			$sessioniId = $this->sessioniId;
-		}
-		if(!isset($this->db)) {
-			throw new Exception("Database not set");
 		}
 		$secure = $this->https;
 		if($domain == null) {
@@ -306,9 +413,17 @@ class sessioni {
 			$date->sub(new DateInterval("P7D"));
 			return  $date->format('Y-m-d H:i:s');
 		}
+		if($stmt->rowCount() <= 0) {
+			return null;
+		}
 		return $stmt->fetchColumn();
 	}
 	
+	/**
+	* Populates $_SESSIONI
+	* <param name="sessioniId">Optional. The sessioniId used. Not set: current sessioniId or LOADALLSESSIONI (see config).</param>
+	* <return>The $_SESSIONI (is defined global)</return>
+	*/
 	private function loadVars($sessioniId = null) {
 		if(isset($GLOBALS["_SESSIONI"])) {
 			unset($GLOBALS["_SESSIONI"]);
@@ -323,15 +438,14 @@ class sessioni {
 		$secure = $this->https;
 		$domain = $this->domain;
 		
-		// @TODO: LOADALLSESSIONI
-		if(LOADALLSESSIONI && $sessioniId == $this->sessioniId) {
+		if(LOADALLSESSIONI && $sessioniId == $this->sessioniId) { // if LOADALLSESSIONI is enabled & the choosen sessioniId is not this sessioniId
 			$stmt = $this->db->prepare('SELECT * FROM `'.TBL_NAMEVARS.'` WHERE (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?) ORDER BY sessioniId');
 			$stmt->execute(array($secure, $this->path, $domain));
 			
 			$curSessioniId = 0;
 			while ($collection = $stmt->fetch(PDO::FETCH_ASSOC)) {
 				echo "ok";
-				if($curSessioniId != $collection["sessioniId"]) {
+				if($curSessioniId != $collection["sessioniId"]) { // new associative sub array when new sessioniId
 					$curSessioniId = $collection["sessioniId"];
 				}
 				
@@ -387,7 +501,6 @@ class sessioni {
 		# $v4mapped_prefix_bin = hex2bin($v4mapped_prefix_hex); 
 
 		// Parse
-		$addr = $_SERVER['REMOTE_ADDR'];
 		$addr_bin = inet_pton($addr);
 		if( $addr_bin === FALSE ) {
 		  // Unparsable? How did they connect?!?
@@ -407,12 +520,3 @@ class sessioni {
 }
 
 ?>
-
-
-
-
-
-
-
-
-
