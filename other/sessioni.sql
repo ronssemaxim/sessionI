@@ -14,6 +14,7 @@ CREATE  TABLE IF NOT EXISTS `sessioni`.`sessioniId` (
   `id` INT(255) NOT NULL AUTO_INCREMENT ,
   `key` VARCHAR(45) NOT NULL ,
   `ip` VARCHAR(45) NOT NULL ,
+  `expires` DATETIME NOT NULL ,
   PRIMARY KEY (`id`) ,
   UNIQUE INDEX `key_UNIQUE` (`key` ASC) )
 ENGINE = InnoDB;
