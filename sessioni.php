@@ -1,7 +1,7 @@
 <?php
 /*
 SessionI, Improved Session for PHP
-@TODO: Read, write, update vars with paramters (secure, domain, path,...)
+@TODO: Return true/false if var exists
 */
 require_once __DIR__ . '/includes/config.php';
 
@@ -324,15 +324,36 @@ class sessioni {
 	* Drops expired vars.
 	* <param name="sessioniId">Optional. A sessioniId. Set: drop expired vars for this session. Not set: drop expired vars for all sessions.</param>
 	*/
-	public function dropExpiredVars($sessioniId = null) {
+	public function dropExpiredVars($expire = null, $domain = null, $path = null, $secure = null, $sessioniId = null) {
 		$date = new Datetime();
+		
+		if($domain == null) {
+			$domain = $this->domain;
+		}
+		if($path == null) {
+			$path == $this->path;
+		}
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}
+		
 		if($sessioniId == null) {
-			$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE expires < ?');
-			$stmt->execute(array($date->format('Y-m-d H:i;s')));
+			$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE expires < ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+			$stmt->execute(array($date->format('Y-m-d H:i;s'), $secure, $path, $domain));
 		}
 		else {
-			$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND expires < ?');
-			$stmt->execute(array($sessioniId, $date->format('Y-m-d H:i;s')));
+			$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND expires < ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+			$stmt->execute(array($sessioniId, $date->format('Y-m-d H:i;s'), $secure, $path, $domain));
 		}
 	}
 	
@@ -341,12 +362,32 @@ class sessioni {
 	* <param name="var">The var to drop.</param>
 	* <param name="sessioniId">Optional. The sessioniId. Not set: current sessioniId</param>
 	*/
-	public function dropVar($var, $sessioniId = null) {
+	public function dropVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if($domain == null) {
+			$domain = $this->domain;
+		}
+		if($path == null) {
+			$path == $this->path;
+		}
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}
+		
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
-		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ?');
-		$stmt->execute(array($sessioniId, $var));
+		$stmt = $this->db->prepare('DELETE FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+		$stmt->execute(array($sessioniId, $var, $secure, $path, $domain));
 		if(isset($GLOBALS[$var])) {
 			unset($GLOBALS[$var]);
 		}
@@ -361,23 +402,34 @@ class sessioni {
 	* <param name="sessioniId">Optional. The sessioniId to search in. Not set: current sessioniId.</param>
 	* <return>Null if not found. Value if found</return>
 	*/
-	public function getVar($var, $domain = null, $path = null, $sessioniId = null) {
+	public function getVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
-		$secure = $this->https;
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}/*
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}*/
+		
 		if($domain == null) {
 			$domain = $this->domain;
 		}
 
 		if($path == null) {
-			$stmt = $this->db->prepare('SELECT `varValue` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
-			$stmt->execute(array($sessioniId, $var, $secure, $this->path, $domain));
+			$path = $this->path;
 		}
-		else {
-			$stmt = $this->db->prepare('SELECT `varValue` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
-			$stmt->execute(array($sessioniId, $var, $secure, $path, $domain));
-		}
+		$stmt = $this->db->prepare('SELECT `varValue` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = '.($secure ? '1' : '0').(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+		$stmt->execute(array($sessioniId, $var, $path, $domain));
+		
 		if($stmt->rowCount() <= 0) {
 			return null;
 		}
@@ -391,23 +443,33 @@ class sessioni {
 	* <param name="sessioniId">Optional. The sessioniId to search in. Not set: current sessioniId.</param>
 	* <return>Null if not found, else the expiration time.</return>
 	*/
-	public function getVarExpiration($var, $domain = null, $path = null, $sessioniId = null) {
+	public function getVarExpiration($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
-		$secure = $this->https;
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}
+
 		if($domain == null) {
 			$domain = $this->domain;
 		}
 		
 		if($path == null) {
-			$stmt = $this->db->prepare('SELECT `expires` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
-			$stmt->execute(array($sessioniId, $var, $secure, $this->path, $domain));
+			$path = $this->path;
 		}
-		else {
-			$stmt = $this->db->prepare('SELECT `expires` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
-			$stmt->execute(array($sessioniId, $var, $secure, $path, $domain));
-		}
+		$stmt = $this->db->prepare('SELECT `expires` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+		$stmt->execute(array($sessioniId, $var, $secure, $path, $domain));
 		if($stmt->rowCount() <= 0) {
 			$date = new Datetime();
 			$date->sub(new DateInterval("P7D"));
@@ -424,7 +486,7 @@ class sessioni {
 	* <param name="sessioniId">Optional. The sessioniId used. Not set: current sessioniId or LOADALLSESSIONI (see config).</param>
 	* <return>The $_SESSIONI (is defined global)</return>
 	*/
-	private function loadVars($sessioniId = null) {
+	public function loadVars($domain = null, $path = null, $secure = null, $sessioniId = null) {
 		if(isset($GLOBALS["_SESSIONI"])) {
 			unset($GLOBALS["_SESSIONI"]);
 		}
@@ -435,12 +497,29 @@ class sessioni {
 			$sessioniId = $this->sessioniId;
 		}
 
-		$secure = $this->https;
-		$domain = $this->domain;
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}
+		if($domain == null) {
+			$domain = $this->domain;
+		}
+		if($path == null) {
+			$path = $this->path;
+		}
 		
 		if(LOADALLSESSIONI && $sessioniId == $this->sessioniId) { // if LOADALLSESSIONI is enabled & the choosen sessioniId is not this sessioniId
 			$stmt = $this->db->prepare('SELECT * FROM `'.TBL_NAMEVARS.'` WHERE (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?) ORDER BY sessioniId');
-			$stmt->execute(array($secure, $this->path, $domain));
+			$stmt->execute(array($secure, $path, $domain));
 			
 			$curSessioniId = 0;
 			while ($collection = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -454,7 +533,7 @@ class sessioni {
 		}
 		else {
 			$stmt = $this->db->prepare('SELECT * FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
-			$stmt->execute(array($sessioniId, $secure, $this->path, $domain));
+			$stmt->execute(array($sessioniId, $secure, $path, $domain));
 
 			while ($collection = $stmt->fetch(PDO::FETCH_ASSOC)) {
 				$_SESSIONI[$collection["varName"]] = $collection["varValue"];
