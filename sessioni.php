@@ -1,7 +1,6 @@
 <?php
 /*
 SessionI, Improved Session for PHP
-@TODO: Return true/false if var exists
 */
 require_once __DIR__ . '/includes/config.php';
 
@@ -41,20 +40,20 @@ class sessioni {
 			$this->createSessioni();
 		}
 		if($cookieKey != $this->getSessioniKey()) { // if the key from the db doesn't match the cookie's key
-			if(IPMATCHKEY) { // if ip must match key, create new session
+			if(IPMATCHKEY) { // if ip must match key, create new sessioni
 				$this->dropSessioni();
 				$this->createSessioni();
 			}
 			else {
-				if(COOKIEPRIORITY) { // if cookie has priority, create session based on cookie
+				if(COOKIEPRIORITY) { // if cookie has priority, create sessioni based on cookie
 					$this->createSessioni(null, $cookieKey);
 				}
 			}
 		}
-		setcookie('sessioniKey', $this->getSessioniKey(), time()+60*60*24*365); // always reinitialize the session, to reset the cookie timer
+		setcookie('sessioniKey', $this->getSessioniKey(), time()+60*60*24*365); // always reinitialize the sessioni, to reset the cookie timer
 		
 		$this->dropExpiredVars(); // drop expired vars of any sessioni
-		$this->loadProperties(); // set the session properties (session id, key & datetime)
+		$this->loadProperties(); // set the sessioni properties (sessioni id, key & datetime)
 		$this->loadVars(); // set the global sessioni[][] var
 	}
 	
@@ -94,7 +93,7 @@ class sessioni {
 		}
 		$this->sessioniId = $this->getSessioniId($ip);
 		$this->sessioniKey = $this->getSessioniKey($ip);
-		$this->resetSessioniExpiration(); // reset session expiration each time it is accessed
+		$this->resetSessioniExpiration(); // reset sessioni expiration each time it is accessed
 	}
 	
 	/**
@@ -151,7 +150,7 @@ class sessioni {
 	
 	/**
 	* get the sessioni expiration datetime for the choosen ip/key
-	* <param name="ip">Optional. The ip/key to get the session expiration from.</param>
+	* <param name="ip">Optional. The ip/key to get the sessioni expiration from.</param>
 	* <return>The expiration time. Null if not found.</return>
 	*/
 	public function getSessioniExpiration($ip = null) {
@@ -180,7 +179,7 @@ class sessioni {
 			$ip = $this->ip;
 		}
 		
-		$this->dropSessioni($ip); // drop the session first
+		$this->dropSessioni($ip); // drop the sessioni first
 		
 		if($expire == null) {
 			$expire = DEFAULTKEYEXPIRETIME;
@@ -204,7 +203,7 @@ class sessioni {
 	}
 	
 	/**
-	* Drop the session of the desired ip
+	* Drop the sessioni of the desired ip
 	* <param name="ip">Optional. The ip/key to drop the sessioni for.</param>
 	*/
 	public function dropSessioni($ip = null) {
@@ -243,6 +242,7 @@ class sessioni {
 	}
 
 	
+	
 	/**
 	* Sets a var for a sessioni.
 	* <param name="var">The name of the variable.</param>
@@ -255,6 +255,14 @@ class sessioni {
 	* <return>True if succeeded</return>
 	*/
 	public function setVar($var, $value, $expire = null, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if(varExists($var, $domain, $path, $secure, $sessioniId)) { // var exists
+			if(!OVERWRITEVARS) { // if overwrite is  not permitted
+				return false;
+			}
+			else { // else drop the var & continue
+				$this->dropVar($var, $domain, $path, $secure, $sessioniId);
+			}
+		}
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
@@ -267,7 +275,7 @@ class sessioni {
 			$curDate = new Datetime();
 			$diff = $reqDate->getTimestamp() - $curDate->getTimestamp();
 			if($diff < 0) { // if expired; drop it & return true
-				dropVar($var, $sessioniId);
+				dropVar($var, $domain, $path, $secure, $sessioniId);
 				return true;
 			}
 		}
@@ -287,15 +295,6 @@ class sessioni {
 		
 		if($domain == null) {
 			$domain = '';
-		}
-		
-		if($this->getVar($var, $sessioniId) !=  null) { // var exists
-			if(!OVERWRITEVARS) { // if overwrite is  not permitted
-				return false;
-			}
-			else { // else drop the var & continue
-				$this->dropVar($var, $sessioniId);
-			}
 		}
 		
 		if($path == null) { // if no path is set
@@ -322,7 +321,7 @@ class sessioni {
 	
 	/**
 	* Drops expired vars.
-	* <param name="sessioniId">Optional. A sessioniId. Set: drop expired vars for this session. Not set: drop expired vars for all sessions.</param>
+	* <param name="sessioniId">Optional. A sessioniId. Set: drop expired vars for this sessioni. Not set: drop expired vars for all sessions.</param>
 	*/
 	public function dropExpiredVars($expire = null, $domain = null, $path = null, $secure = null, $sessioniId = null) {
 		$date = new Datetime();
@@ -363,6 +362,9 @@ class sessioni {
 	* <param name="sessioniId">Optional. The sessioniId. Not set: current sessioniId</param>
 	*/
 	public function dropVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if(!varExists($var, $domain, $path, $secure, $sessioniId)) {
+			return false;
+		}
 		if($domain == null) {
 			$domain = $this->domain;
 		}
@@ -391,8 +393,51 @@ class sessioni {
 		if(isset($GLOBALS[$var])) {
 			unset($GLOBALS[$var]);
 		}
+		return true;
 	}
 	
+	/**
+	* Checks if a sessioni variable exists
+	* <param name="var">The var to check.</param>
+	* <param name="domain">Optional. The domain to search in.</param>
+	* <param name="path">Optional. The path to search in.</param>
+	* <param name="sessioniId">Optional. The sessioniId to search in. Not set: current sessioniId.</param>
+	* <return>False if not found. True if found</return>
+	*/
+	public function varExists($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if($sessioniId == null) {
+			$sessioniId = $this->sessioniId;
+		}
+		if($secure == null) { // set the secure
+			if(DEFAULTSECURE == "follow") {
+				$secure = $this->https;
+			}
+			else {
+				$secure = DEFAULTSECURE;
+			}
+		}/*
+		else { // check for valid secure
+			if(!SECUREGLOBAL && !$this->https) { // if on HTTP & HTTPS vars are invisible on HTTP ==> secure = false
+				$secure = false;
+			}
+		}*/
+		
+		if($domain == null) {
+			$domain = $this->domain;
+		}
+
+		if($path == null) {
+			$path = $this->path;
+		}
+		
+		$stmt = $this->db->prepare('SELECT `id` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = '.($secure ? '1' : '0').(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+		$stmt->execute(array($sessioniId, $var, $path, $domain));
+		
+		if($stmt->rowCount() <= 0) {
+			return false;
+		}
+		return return;
+	}
 	
 	/**
 	* Get a variable value.
@@ -403,6 +448,9 @@ class sessioni {
 	* <return>Null if not found. Value if found</return>
 	*/
 	public function getVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if(!varExists($var, $domain, $path, $secure, $sessioniId)) {
+			return null;
+		}
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
@@ -429,12 +477,10 @@ class sessioni {
 		}
 		$stmt = $this->db->prepare('SELECT `varValue` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = '.($secure ? '1' : '0').(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
 		$stmt->execute(array($sessioniId, $var, $path, $domain));
-		
-		if($stmt->rowCount() <= 0) {
-			return null;
-		}
+
 		return $stmt->fetchColumn();
 	}
+	
 	/**
 	* Get the expiration time of a variable.
 	* <param name="var">The var.</param>
@@ -444,6 +490,11 @@ class sessioni {
 	* <return>Null if not found, else the expiration time.</return>
 	*/
 	public function getVarExpiration($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
+		if(!varExists($var, $domain, $path, $secure, $sessioniId)) { // return 1 week ago if it doesnt exist
+			$date = new Datetime();
+			$date->sub(new DateInterval("P7D"));
+			return  $date->format('Y-m-d H:i:s');
+		}
 		if($sessioniId == null) {
 			$sessioniId = $this->sessioniId;
 		}
@@ -470,14 +521,6 @@ class sessioni {
 		}
 		$stmt = $this->db->prepare('SELECT `expires` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = ?'.(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
 		$stmt->execute(array($sessioniId, $var, $secure, $path, $domain));
-		if($stmt->rowCount() <= 0) {
-			$date = new Datetime();
-			$date->sub(new DateInterval("P7D"));
-			return  $date->format('Y-m-d H:i:s');
-		}
-		if($stmt->rowCount() <= 0) {
-			return null;
-		}
 		return $stmt->fetchColumn();
 	}
 	
