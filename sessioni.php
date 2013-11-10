@@ -436,7 +436,7 @@ class sessioni {
 		if($stmt->rowCount() <= 0) {
 			return false;
 		}
-		return return;
+		return true;
 	}
 	
 	/**
