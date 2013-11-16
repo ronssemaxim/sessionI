@@ -255,7 +255,7 @@ class sessioni {
 	* <return>True if succeeded</return>
 	*/
 	public function setVar($var, $value, $expire = null, $domain = null, $path = null, $secure = null, $sessioniId = null) {
-		if(varExists($var, $domain, $path, $secure, $sessioniId)) { // var exists
+		if($this->varExists($var, $domain, $path, $secure, $sessioniId)) { // var exists
 			if(!OVERWRITEVARS) { // if overwrite is  not permitted
 				return false;
 			}
@@ -362,7 +362,7 @@ class sessioni {
 	* <param name="sessioniId">Optional. The sessioniId. Not set: current sessioniId</param>
 	*/
 	public function dropVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
-		if(!varExists($var, $domain, $path, $secure, $sessioniId)) {
+		if(!$this->varExists($var, $domain, $path, $secure, $sessioniId)) {
 			return false;
 		}
 		if($domain == null) {
@@ -430,7 +430,7 @@ class sessioni {
 			$path = $this->path;
 		}
 		
-		$stmt = $this->db->prepare('SELECT `id` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = '.($secure ? '1' : '0').(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
+		$stmt = $this->db->prepare('SELECT `varId` FROM `'.TBL_NAMEVARS.'` WHERE sessioniId = ? AND varName = ? AND (secure = '.($secure ? '1' : '0').(SECUREGLOBAL ? ' OR secure = 1' : '').') AND (ISNULL(path) OR path = ?) AND (domain = "" OR domain = ?)');
 		$stmt->execute(array($sessioniId, $var, $path, $domain));
 		
 		if($stmt->rowCount() <= 0) {
@@ -448,7 +448,7 @@ class sessioni {
 	* <return>Null if not found. Value if found</return>
 	*/
 	public function getVar($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
-		if(!varExists($var, $domain, $path, $secure, $sessioniId)) {
+		if(!$this->varExists($var, $domain, $path, $secure, $sessioniId)) {
 			return null;
 		}
 		if($sessioniId == null) {
@@ -490,7 +490,7 @@ class sessioni {
 	* <return>Null if not found, else the expiration time.</return>
 	*/
 	public function getVarExpiration($var, $domain = null, $path = null, $secure = null, $sessioniId = null) {
-		if(!varExists($var, $domain, $path, $secure, $sessioniId)) { // return 1 week ago if it doesnt exist
+		if(!$this->varExists($var, $domain, $path, $secure, $sessioniId)) { // return 1 week ago if it doesnt exist
 			$date = new Datetime();
 			$date->sub(new DateInterval("P7D"));
 			return  $date->format('Y-m-d H:i:s');
